@@ -1,0 +1,95 @@
+LIBRARY ieee;
+USE ieee.std_logic_1164.ALL;
+ 
+library work;
+use work.fpupack.all;
+use work.logpack.all;
+
+-- Uncomment the following library declaration if using
+-- arithmetic functions with Signed or Unsigned values
+--USE ieee.numeric_std.ALL;
+ 
+ENTITY tbc IS
+END tbc;
+ 
+ARCHITECTURE behavior OF tbc IS 
+ 
+    -- Component Declaration for the Unit Under Test (UUT)
+ 
+    COMPONENT ID is
+		 Generic (
+				RegisterLength : natural := REG_BLOCK_WIDTH;
+				RegisterBlockDepth : natural := REG_BLOCK_DEPTH;	
+				Warp_Id_Length : natural := WARP_ID_SP;
+				Reg_Addr_Length : natural := REG_ADDR_SP;
+				Max_RegBlock_Numb : natural := MAX_REG_BLOCK_PER_WARP;
+				Block_Addr_Length : natural := ROW_ADDR_SP;
+				RegBlock_Addr_Length : natural := REG_BLOCK_ADDR_SP;
+				RegBlock_Row_Numb : natural := REG_BLOCK_ROW;
+				RegBlock_Col_Numb : natural := REG_BLOCK_COL
+			);
+		 Port(
+			clk    : in std_logic;
+			reset  : in std_logic;
+			en     : in std_logic;
+			OpQueueIn : in instruction_word_queue_type;
+			NumReg 	 : in std_logic_vector(Max_RegBlock_Numb-1 downto 0);
+			MuxOut  	 : out std_logic_vector (SEL_NUM-1 downto 0);
+		   EnOpOut 	 : out std_logic_vector (OP_NUM-1 DOWNTO 0);
+			DataOutA  : out data_out_col_array_type;
+         DataOutB  : out data_out_col_array_type;
+			NotFound  : out std_logic
+		);
+    END COMPONENT;
+    
+
+   --Inputs
+   signal clk, reset, en : std_logic := '0';
+	signal OpQueueIn : instruction_word_queue_type;
+
+ 	--Outputs
+   signal pipe_value : std_logic_vector(79 downto 0);
+   signal an : std_logic_vector(3 downto 0);
+   signal seg : std_logic_vector(7 downto 0);
+
+   -- Clock period definitions
+   constant clk_period : time := 10 ns;
+ 
+BEGIN
+ 
+	-- Instantiate the Unit Under Test (UUT)
+   uut: pipeline_on_board PORT MAP (
+          clk => clk,
+          button => button,
+          disp_high => disp_high,
+          disp_address => disp_address,
+          reset => reset,
+          pipe_value => pipe_value,
+          an => an,
+          seg => seg
+        );
+
+   -- Clock process definitions
+   clk_process :process
+   begin
+		clk <= '0';
+		wait for clk_period/2;
+		clk <= '1';
+		wait for clk_period/2;
+   end process;
+ 
+
+   -- Stimulus process
+   stim_proc: process
+   begin		
+      -- hold reset state for 100 ns.
+      wait for 100 ns;	
+
+      wait for clk_period*10;
+
+      -- insert stimulus here 
+
+      wait;
+   end process;
+
+END;

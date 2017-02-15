@@ -1,0 +1,248 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    10/06/2015
+-- Design Name: 
+-- Module Name:    RegisterMap - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description:  I registri sono organizzati in banchi di dimensioni configurabili (Register Block), nel file fpupack 
+--				     sono presenti le seguenti costanti per la configurazione dei registri:
+--							REG_BLOCK_WIDTH: larghezza dei registri (in bit).
+--							REG_BLOCK_DEPTH: determina il numero di registri presenti in un banco.
+--					  I Register Block sono organizzati come una matrice, le righe rappresentano il numero totale di
+--					  banchi del design, il numero di colonne la replicazione per ogni Core. Anche questi parametri sono 
+--					  configurabili: 
+--							REG_BLOCK_ROW: numero di banchi per Core. 
+--							REG_BLOCK_COL: generalmente posto pari al numero di Core.
+--				     
+--					  Il RegisterMap gestisce i register block del design, assegnando dinamicamente ad ogni Warp i banchi 
+--					  ad esso necessari ed effettuando la traduzione da registro virtuale a registro fisico in modo che
+--				     l'accesso ai registri venga effettuato correttamente al blocco assegnato al Warp (meccanismo simile a 
+--					  quello dell'MMU). 
+--					  Le operazioni effettuate dal RegisterMap sono:
+--							a) Allocazione di un Warp: Ogni Warp prima di eseguire operazioni che riguardino i registri deve 
+--								essere allocato. Può richiedere da 1 a MAX_REG_BLOCK_PER_WARP (configurabile) banchi in base a  
+--					  			quanti registri necessita.
+--						   b) Traduzione in un registro: Effettua la traduzione da registro virtuale a registro fisico, 
+--								restituendo il blocco fisico relativo a quel registro. Es: consideriamo il caso in cui abbiamo
+--								8 banchi di registri, ogni banco è formato da 16 registri ed è stato allocato il Warp con ID 10
+--								che richiedeva 2 banchi, supponiamo che il RegisterMap abbia assegnato a questo Warp il banco 3
+--								ed il banco 5. Se il Warp 10 vuole effettuare un accesso al registro R12, il RegisterMap fornirà 
+--								come indirizzo fisico al quale accedere il registro R12 del banco 3. Se Warp 10 vuole accedere 
+--								al registro R20, il RegisterMap fornirà come indirizzo fisico al quale accedere il registro 
+--								R4 del banco 5.  
+--							c) Deallocazione di un Warp: Libera le risorse usate dal Warp indicato. 
+--					  
+--				     Il RegisterMap tiene traccia dei Warp allocati e dei blocchi a loro assegnati mediante la 
+--					  tabella register_map. Questa ha un numero di colonne (denominate Block0, Block1, .., BlockN-1) 
+--					  pari al massimo numero di register block assegnabili ad un Warp (configurabile con MAX_REG_BLOCK_PER_WARP). 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 1.7
+-- Revision 0.01 - File Created
+-- Additional Comments: 
+--			Prova usando una sorta di Hashtable per eliminare i for di accesso.
+--			Gestisce il Write Enable dei blocchi.
+--			Ha i Generic.
+----------------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+library work;
+use work.fpupack.all;
+
+entity RegisterMap is
+	 Generic (
+			Warp_Id_Length : natural := WARP_ID_SP;
+			Reg_Addr_Length : natural := REG_ADDR_SP;
+			Max_RegBlock_Numb : natural := MAX_REG_BLOCK_PER_WARP;
+			Block_Addr_Length : natural := ROW_ADDR_SP;
+			RegBlock_Addr_Length : natural := REG_BLOCK_ADDR_SP;
+			RegBlock_Numb : natural := REG_BLOCK_ROW
+		);
+	 Port(
+			clk    : in std_logic;
+			reset  : in std_logic;
+			en     : in std_logic;
+			WrEn   : in std_logic;
+			WarpId : in std_logic_vector(Warp_Id_Length-1 downto 0);
+			RegIn1 : in std_logic_vector(Reg_Addr_Length-1 downto 0);
+			RegIn2 : in std_logic_vector(Reg_Addr_Length-1 downto 0);
+			OpIn   : in std_logic_vector(REG_OP_SP-1 downto 0);
+			NumReg : in std_logic_vector(Max_RegBlock_Numb-1 downto 0);
+			BlockAddr1 : out std_logic_vector(Block_Addr_Length-1 downto 0);
+			BlockAddr2 : out std_logic_vector(Block_Addr_Length-1 downto 0);
+			RegAddr1	: out std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			RegAddr2	: out std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			WrEnVect	: out std_logic_vector(RegBlock_Numb-1 downto 0);
+			NotFound : out std_logic
+		);
+end entity;
+
+architecture rtl of RegisterMap is
+
+	-- An array of Blocks address, each element of the vector corresponds to a fisical Register Block. This type is used
+	-- to create the Register Map Table. 
+	type block_array_type is array (0 to Max_RegBlock_Numb-1) of std_logic_vector(Block_Addr_Length-1 downto 0); 
+	
+	-- Define of Register Map Table Row type, it's a struct that records each Warp wich fisical registers uses. 
+	type reg_map_row_type is record
+		WarpId  : std_logic_vector(Warp_Id_Length-1 downto 0);
+		Blocks  : block_array_type;
+		Depth   : std_logic_vector(Max_RegBlock_Numb-1 downto 0);
+		Unused  : std_logic;
+	end record;
+	
+	-- Define the Register Map Table, this has as many row as the fisical Register Blocks allocated.
+	type reg_map_type is array (0 to RegBlock_Numb-1) of reg_map_row_type;
+	type reg_map_stdlogic_array_type is array (0 to RegBlock_Numb-1) of std_logic_vector(Block_Addr_Length-1 downto 0);
+
+	-- This function initializes the index distributor vector.
+	function init_reg_map_array (
+		 size_array : integer;
+		 size_std_logic : integer 
+		) return reg_map_stdlogic_array_type is
+
+		 variable index : reg_map_stdlogic_array_type;
+		 
+	  begin
+		 
+		 for i in 0 to size_array-1 loop		
+				index(i) := conv_std_logic_vector(i, size_std_logic);
+		 end loop;	 			 
+		return index;
+	end function;
+	
+	-- This function returns the first RegBlock_Numb elemento of the index distributor vector from the head pointer.
+	function array_select_out (
+		 vector : reg_map_stdlogic_array_type;
+		 size_vector : integer;
+		 pointer : std_logic_vector(Block_Addr_Length-1 downto 0);
+		 size_array : integer
+		) return block_array_type is
+
+		 variable index : block_array_type;
+		 
+	  begin
+		 
+		 for i in 0 to size_array-1 loop		
+				index(i) := vector((conv_integer(pointer) + i) mod size_vector);
+		 end loop;	 			 
+		return index;
+	end function;
+	
+	constant REG_ADR_MAX_REG_BLOCK_PER_WARP_GAP : std_logic_vector(Block_Addr_Length-Max_RegBlock_Numb-1 downto 0) := (others => '0');
+	constant REG_MAP_STDLOGIC_ARRAY_INIT : reg_map_stdlogic_array_type := init_reg_map_array(RegBlock_Numb, Block_Addr_Length); 
+	 	 	 
+	-- Constant for initialize a Register Map Table Row.
+	constant REG_MAP_ROW_INIT : reg_map_row_type := (
+										WarpId => (others =>'0'),
+                              Blocks => (others => (others=>'0')),
+                              Depth => (others=>'0'),
+										Unused => '1');
+	 
+	-- The Register Map Table.  
+	signal register_map : reg_map_type := (others => REG_MAP_ROW_INIT);
+	
+	signal reg_out1, reg_out2 : std_logic_vector(RegBlock_Addr_Length-1 downto 0) := (others => '0');
+	signal block_out1, block_out2 : std_logic_vector(Block_Addr_Length-1 downto 0) := (others =>'0');
+	signal not_found : std_logic := '1';
+	
+	-- The index distributor vector.
+	signal memory : reg_map_stdlogic_array_type := REG_MAP_STDLOGIC_ARRAY_INIT;
+	signal headptr : std_logic_vector(Block_Addr_Length-1 downto 0) := (others => '0');
+	signal tailptr : std_logic_vector(Block_Addr_Length-1 downto 0) := (others => '1');
+	signal wr_en : std_logic_vector(RegBlock_Numb-1 downto 0) := (others => '0');
+	
+begin
+	
+	RegAddr1 <= reg_out1;
+	RegAddr2 <= reg_out2;
+	BlockAddr1 <= block_out1;
+	BlockAddr2 <= block_out2;
+	NotFound <= not_found;
+	WrEnVect <= wr_en;
+	
+	process(clk, reset) begin
+			if reset = '1' then
+				tailptr <= (others => '1');
+				headptr <= (others => '0');
+				register_map <= (others => REG_MAP_ROW_INIT);
+				memory <= REG_MAP_STDLOGIC_ARRAY_INIT;
+				reg_out1 <= (others => '0');
+				reg_out2 <= (others => '0');
+				block_out1 <= (others => '0');
+				block_out2 <= (others => '0');
+				wr_en <= (others => '0');
+				not_found <= '1';
+			elsif rising_edge(clk) then
+				if en = '1' then
+				
+				case OpIn is
+					when "00" => -- Alloca Warp
+						if register_map(conv_integer(WarpId) mod RegBlock_Numb).Unused = '1' then
+							register_map(conv_integer(WarpId) mod RegBlock_Numb).WarpId <= WarpId;
+							register_map(conv_integer(WarpId) mod RegBlock_Numb).Blocks <= array_select_out(memory, RegBlock_Numb, headptr, Max_RegBlock_Numb);
+							register_map(conv_integer(WarpId) mod RegBlock_Numb).Depth <= NumReg;
+							register_map(conv_integer(WarpId) mod RegBlock_Numb).Unused <= '0'; 
+							headptr <= headptr + (REG_ADR_MAX_REG_BLOCK_PER_WARP_GAP & NumReg);
+						end if;
+						reg_out1 <= (others => '0');
+						reg_out2 <= (others => '0');
+						block_out1 <= (others => '0');
+						block_out2 <= (others => '0');
+						wr_en <= (others => '0');
+						not_found <= '1';
+						
+					when "01" => -- Dealloca Warp
+						if (register_map(conv_integer(WarpId) mod RegBlock_Numb).WarpId = WarpId) and (register_map(conv_integer(WarpId) mod RegBlock_Numb).Unused = '0') then
+							register_map(conv_integer(WarpId) mod RegBlock_Numb).Unused <= '1'; 
+							for j in 0 to Max_RegBlock_Numb-1 loop
+								if j < conv_integer(register_map(conv_integer(WarpId) mod RegBlock_Numb).Depth) then
+									memory((j + conv_integer(tailptr + 1))) <= register_map(conv_integer(WarpId) mod RegBlock_Numb).Blocks(j); 
+								else 
+									exit;
+								end if;
+							end loop;
+							tailptr <= tailptr + (REG_ADR_MAX_REG_BLOCK_PER_WARP_GAP & register_map(conv_integer(WarpId) mod RegBlock_Numb).Depth);
+ 						end if;
+						reg_out1 <= (others => '0');
+						reg_out2 <= (others => '0');
+						block_out1 <= (others => '0');
+						block_out2 <= (others => '0');
+						wr_en <= (others => '0');
+						not_found <= '1';
+
+					when "10" => -- Traduci registro
+						not_found <= '1';
+						wr_en <= (others => '0');
+						if (register_map(conv_integer(WarpId) mod RegBlock_Numb).WarpId = WarpId) and (register_map(conv_integer(WarpId) mod RegBlock_Numb).Unused = '0') then 
+							reg_out1 <= RegIn1(RegBlock_Addr_Length-1 downto 0);
+							reg_out2 <= RegIn2(RegBlock_Addr_Length-1 downto 0);
+							block_out1 <= register_map(conv_integer(WarpId) mod RegBlock_Numb).Blocks(conv_integer(RegIn1(Reg_Addr_Length-1 downto RegBlock_Addr_Length)));
+							block_out2 <= register_map(conv_integer(WarpId) mod RegBlock_Numb).Blocks(conv_integer(RegIn2(Reg_Addr_Length-1 downto RegBlock_Addr_Length)));
+							if WrEn = '1' then
+								wr_en(conv_integer(register_map(conv_integer(WarpId) mod RegBlock_Numb).Blocks(conv_integer(RegIn1(Reg_Addr_Length-1 downto RegBlock_Addr_Length))))) <= '1';
+							end if;
+							not_found <= '0';
+						end if;
+						
+					when others =>
+						reg_out1 <= (others => '0');
+						reg_out2 <= (others => '0');
+						block_out1 <= (others => '0');
+						block_out2 <= (others => '0');
+						wr_en <= (others => '0');
+						not_found <= '1';
+				end case;		
+			
+			end if;
+		end if;
+	end process;
+end rtl;

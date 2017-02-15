@@ -1,0 +1,59 @@
+transcript on
+if {[file exists rtl_work]} {
+	vdel -lib rtl_work -all
+}
+vlib rtl_work
+vmap work rtl_work
+
+vlog -vlog01compat -work work +incdir+C:/workspace_quartus/SM/SM_v3.1/db {C:/workspace_quartus/SM/SM_v3.1/db/mult_7ct.v}
+vlog -vlog01compat -work work +incdir+C:/workspace_quartus/SM/SM_v3.1/db {C:/workspace_quartus/SM/SM_v3.1/db/mult_vbt.v}
+vlog -vlog01compat -work work +incdir+C:/workspace_quartus/SM/SM_v3.1/db {C:/workspace_quartus/SM/SM_v3.1/db/mult_tbt.v}
+vlog -vlog01compat -work work +incdir+C:/workspace_quartus/SM/SM_v3.1/db {C:/workspace_quartus/SM/SM_v3.1/db/mult_4ct.v}
+vlog -vlog01compat -work work +incdir+C:/workspace_quartus/SM/SM_v3.1/db {C:/workspace_quartus/SM/SM_v3.1/db/mult_5ct.v}
+vcom -93 -work work {C:/altera/15.0/quartus/dspba/Libraries/vhdl/base/dspba_library_package.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Dispatcher/VectorShifter.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Issue/counter.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/RegisterMap/RegisterBank.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/registro_n_bit.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/mux_2to1.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/logpack.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/rint_dut_safe_path.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fract_dut_safe_path.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_mult.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_min_dut_safe_path.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_max_dut_safe_path.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_div.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_add.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_abs.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/FifoShifter.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/ceilfloor_dut_safe_path.vhd}
+vcom -93 -work work {C:/altera/15.0/quartus/dspba/Libraries/vhdl/base/dspba_library.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/fpupack.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/rint_dut_prim.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/rint_dut.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fract_dut_prim.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fract_dut.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_min_dut_prim.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_min_dut.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_max_dut_prim.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_max_dut.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/floatComponent_rint_dut_prim_rintBlock_typeSFloat_23_8_typeSFloat_23_8_310cu3u78A0Z26123642i229755y.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/floatComponent_fract_dut_prim_fracBlock_typeSFloat_23_8_typeSFloat_23_8_310cu4udA0Z26123642i229755y.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/floatComponent_fp_min_dut_prim_minBlock_typeSFloat_23_8_typeSFloat_23_8_typeSFloA0Z6154ge2a150m4e5u.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/floatComponent_fp_max_dut_prim_maxBlock_typeSFloat_23_8_typeSFloat_23_8_typeSFloA0Z6154ge2a150m4e5u.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/floatComponent_ceilfloor_dut_prim_floorBlock_typeSFloat_23_8_typeSFloat_23_8_310A0Z26123642i229755y.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/floatComponent_ceilfloor_dut_prim_ceilBlock_typeSFloat_23_8_typeSFloat_23_8_310cA0Z26123642i229755y.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/ceilfloor_dut_prim.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/ceilfloor_dut.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Dispatcher/OpDecoder.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Dispatcher/Dispatcher.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Issue/UpdateVect.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Issue/StructHazardCheck.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Issue/Issue.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/Issue/IndexSelector.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/RegisterMap/RegisterMap.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/ID/DecoderRegMap.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/FPCore.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/FPCore/fp_neg.vhd}
+vcom -93 -work work {C:/workspace_quartus/SM/SM_v3.1/SM.vhd}
+

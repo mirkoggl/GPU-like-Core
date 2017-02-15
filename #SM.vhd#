@@ -1,0 +1,699 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    28/07/2015
+-- Design Name: 
+-- Module Name:    SM - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description: 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 0.34
+-- Revision 0.01 - File Created
+-- Additional Comments:
+--
+--								This design is a RISC-like, fully pipelined, SIMD floating-point oriented architecture and
+--								it is designed to be customizable and to use FPGAs flexibility. As every RISC-like
+--								processors, this design is divided in four fundamental stages: the Instruction Decode
+--								stage (ID), the Execution stage (EX), the Memory stage (MEM) and the Write Back
+--								stage (WB).
+--								
+--								The ID stage has different instruction queues (from different kernels) in input and
+--								it has to choose one of them. ID is divided in three sub-stages. The number of input
+--								queues is user configurable. An instruction contains a collection of threads called
+--								Warps. A Warp contains as many threads as FPU cores allocated. A scheduled
+--								instruction launches N threads that will do the same action on different data (SIMD
+--								paradigm), each thread will get its data from different register bank.
+--								The first sub-stage is the Issue that receives input the schedulable instructions
+--								from different queues. 
+--								The second sub-stage decodes the instruction and selects the right register for the EX. 
+--								This stage manages the register banks and dynamically allocates registers to the warps. 
+--								The third substage just collects the op erands from the registers and passes it to the EX stage.
+--								
+--								The EX stage has as many FPU cores as user decided, the numb er of cores is
+--								user configurable. Here there is an Load/Store Unit that handles shared memory
+--								op erations.
+--								
+----							The MEM stage is where the shared memory blo cks are, there as many shared
+--								memory blo cks as FPU cores allo cated. Each FPU core has its shared memory
+--								blo ck. Each shared memory blo ck address space is user configurable. A limitation
+--								is that shared memory blo cks are not connected through a crossbar each other or
+--								with register banks, this means that threads cannot communicate or share data.
+--								
+--								The instruction word has variable length. It depends on:
+--									- WarpID: identify the warp of length log2(MAX_NUM_WARP) bits, MAX_NUM_WARP is user configurable.
+--									- Operation: operation selected, 5 bits.
+--									- Rs: first source register, length REG_ADDR_SP = log2(MAX_REG_BLOCK_TOEACH_WARP * REG_BLOCK_NUMB) bits, 
+--											MAX_REG_BLOCK_TOEACH_WARP and REG_BLOCK_NUMB are both user configurable.
+--									- Rt: second source register, length REG_ADDR_SP bits.
+--									- Rd: destination register, length REG_ADDR_SP bits.
+--									- MemAddr: memory address of mem operation (load/store), SHARED_MEM_ADDR_LENGTH bits, it is user 
+--											configurable
+--								
+-- 							Data Instruction:
+--								The computation operation possible on the architecture uses the
+--								data instruction type. WarpID identifies the warp, Operat stores
+--								the code of operation to perform, Rs identifies first source register, Rt identifies
+--								second source register, Rd identifies destination register. MemAddr is not used.
+--								
+--								Memory Instruction:
+--								Memory instruction are load and store. WarpID and Operat are as data instructions, Rs is the source register
+--								in a load or the destination register in a store. Rt and Rd are not used, MemAddr
+--								bits are used to address the shared memory.
+--
+--
+--								The top level has in input:
+--									- OpQueueIn: INSTR_NUMB parallel instruction words, INSTR_NUMB is user configurable. ID chooses one of them
+--												in parallel.  
+--									- EnQueue: when high the component stores the instruction words in input. 
+--
+--
+--								In this project we have made some choices to keep the design as simple and
+--								cheap as possible. The Instruction Fetch is not implemented for brevity, hence the
+--								architecture does not handle branch. IF will be a future work. The ID stage does not
+--								check data hazard and branch dominance, it checks just the structural hazard. We have 
+--								decided to not check those hazard because it would be very onerous. Data hazard analysis 
+--								is not easy with registers dynamic allocation and our goal is to keep the architecture simple.
+--
+--
+--
+----------------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+library work;
+use work.fpupack.all;
+use work.logpack.all;
+
+entity SM is
+	Generic (
+			RegisterLength : natural := REG_BLOCK_WIDTH;
+			RegisterBlockDepth : natural := REG_BLOCK_DEPTH;	
+			Warp_Id_Length : natural := WARP_ID_SP;
+			Reg_Addr_Length : natural := REG_ADDR_SP;
+			Max_RegBlock_Numb : natural := MAX_REG_BLOCK_PER_WARP;
+			Block_Addr_Length : natural := ROW_ADDR_SP;
+			RegBlock_Addr_Length : natural := REG_BLOCK_ADDR_SP;
+			RegBlock_Row_Numb : natural := REG_BLOCK_ROW;
+			Core_Numb : natural := CORE_NUMB;
+			Shared_Mem_Addr_Width : natural := SHARED_MEM_ADDR_WIDTH
+		);
+	 Port(
+			clk    : in std_logic;
+			reset  : in std_logic;
+			en     : in std_logic;
+			EnQueue   : in std_logic;
+			OpQueueIn : in instruction_word_queue_type;
+			WrShMem	 : in std_logic;
+			DataIn 	 : in data_out_col_array_type;
+			ShMemAddr : in std_logic_vector (SHARED_MEM_ADDR_WIDTH-1 downto 0);
+			nan		 : out std_logic;
+			overflow	 : out std_logic;
+			dbzero	 : out std_logic;
+			underflow : out std_logic;
+			zero		 : out std_logic;
+			DataOut	 : out data_out_col_array_type
+		);
+end entity;
+
+architecture rtl of SM is
+
+-----------------------------------------------------------------------
+  -- ID Functions
+  -----------------------------------------------------------------------	
+
+  -- This function maps a Register Block column output to the effective output.
+	function row_output_map (
+		 matrix : data_out_matrix_type;
+		 col_size : integer;
+		 row_index : integer
+		) return data_out_col_array_type is
+
+		 variable result : data_out_col_array_type;
+		 
+	  begin
+		 
+		 for i in 0 to col_size-1 loop		
+				result(i) := matrix(i)(row_index);
+		 end loop;	 			 
+		return result;
+	end function;
+
+  -----------------------------------------------------------------------
+  -- ID Component
+  -----------------------------------------------------------------------	
+	COMPONENT RegisterMap
+	 Generic (
+			Warp_Id_Length : natural := WARP_ID_SP;
+			Reg_Addr_Length : natural := REG_ADDR_SP;
+			Max_RegBlock_Numb : natural := MAX_REG_BLOCK_PER_WARP;
+			Block_Addr_Length : natural := ROW_ADDR_SP;
+			RegBlock_Addr_Length : natural := REG_BLOCK_ADDR_SP;
+			RegBlock_Numb : natural := REG_BLOCK_ROW
+		);
+	 Port(
+			clk    : in std_logic;
+			reset  : in std_logic;
+			en     : in std_logic;
+			WrEn   : in std_logic;
+			WarpId : in std_logic_vector(Warp_Id_Length-1 downto 0);
+			RegIn1 : in std_logic_vector(Reg_Addr_Length-1 downto 0);
+			RegIn2 : in std_logic_vector(Reg_Addr_Length-1 downto 0);
+			RegInWr : in std_logic_vector(Reg_Addr_Length-1 downto 0);
+			OpIn   : in std_logic_vector(REG_OP_SP-1 downto 0);
+			NumReg : in std_logic_vector(Max_RegBlock_Numb-1 downto 0);
+			BlockAddr1 : out std_logic_vector(Block_Addr_Length-1 downto 0);
+			BlockAddr2 : out std_logic_vector(Block_Addr_Length-1 downto 0);
+			RegAddr1	: out std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			RegAddr2	: out std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			RegAddrWr	: out std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			WrEnVect	: out std_logic_vector(RegBlock_Numb-1 downto 0);
+			NotFound : out std_logic
+		);
+	END COMPONENT;
+	
+	COMPONENT RegisterBank
+    Generic(
+        N:      natural := 32;  -- word width in bits
+        M:      natural := 4    -- address bits, number of words = 2**M 
+	 );
+    Port ( 
+        clk		  : in   std_logic;
+		  reset	  : in   std_logic;
+        DataIn   : in   std_logic_vector (N-1 downto 0);
+        RdAddrA  : in   std_logic_vector (M-1 downto 0);
+        RdAddrB  : in   std_logic_vector (M-1 downto 0);
+        WrAddr   : in   std_logic_vector (M-1 downto 0);
+        ReadEnA  : in   std_logic;
+        ReadEnB  : in   std_logic;
+        WriteEn  : in   std_logic;
+        DataOutA : out  std_logic_vector (N-1 downto 0);
+        DataOutB : out  std_logic_vector (N-1 downto 0)
+    ); 
+	END COMPONENT;
+	
+	COMPONENT Dispatcher 
+	 Port(
+	     reset	 : in std_logic;
+		  en 	    : in std_logic;
+		  clk	    : in std_logic;
+		  NopIn	 : in std_logic;
+		  op		 : in std_logic_vector (SEL_NUM-1 DOWNTO 0);
+		  MuxOut  : out std_logic_vector (SEL_NUM-1 downto 0);
+		  EnOpOut : out std_logic_vector (OP_NUM-1 DOWNTO 0)
+		);
+	END COMPONENT;
+	
+	COMPONENT Issue
+	Port(
+			clk   : in std_logic;
+			reset : in std_logic;
+			enable: in std_logic;
+			EnQueue  : in std_logic;
+ 			OpIn  : in instruction_word_queue_type;
+			NopOut   : out std_logic;
+			OpOut : out instruction_word_type
+		);
+	END COMPONENT;
+	
+	COMPONENT DecoderRegMap 
+		Generic (
+			Warp_Id_Length : natural := WARP_ID_SP;
+			Reg_Addr_Length : natural := REG_ADDR_SP;
+			Max_RegBlock_Numb : natural := MAX_REG_BLOCK_PER_WARP
+		  );
+		Port(
+			OpIn	: in instruction_word_type;
+			NopIn   : in std_logic;
+			WrEnRegMap   : out std_logic;
+			WarpIdRegMap : out std_logic_vector(Warp_Id_Length-1 downto 0);
+			RegIn1RegMap : out std_logic_vector(Reg_Addr_Length-1 downto 0);
+			RegIn2RegMap : out std_logic_vector(Reg_Addr_Length-1 downto 0);
+			RegInWrRegMap : out std_logic_vector(Reg_Addr_Length-1 downto 0);
+			OpRegMap 	 : out std_logic_vector(REG_OP_SP-1 downto 0);
+			NumRegMap    : out std_logic_vector(Max_RegBlock_Numb-1 downto 0); 
+			NopOut	    : out std_logic
+		);
+	END COMPONENT;
+	
+	COMPONENT RegWrContr is
+		Generic (
+			RegBlock_Addr_Length : natural := REG_BLOCK_ADDR_SP;
+			RegBlock_Numb : natural := REG_BLOCK_ROW
+		  );
+		Port(
+			clk	     : in std_logic;
+			reset	     : in std_logic;
+			en 	     : in std_logic;
+			op			  : in std_logic_vector (SEL_NUM-1 DOWNTO 0);
+			EnWr		  : in std_logic;
+			RegAddrWr	: in std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			WrEnVect	   : in std_logic_vector(RegBlock_Numb-1 downto 0);
+			RegAddrWrOut : out std_logic_vector(RegBlock_Addr_Length-1 downto 0);
+			WrEnVectOut  : out std_logic_vector(RegBlock_Numb-1 downto 0)
+		);
+	END COMPONENT;
+
+  -----------------------------------------------------------------------
+  -- Ex Component
+  -----------------------------------------------------------------------	
+  
+	COMPONENT FPCore
+		PORT(
+			clk	   	: IN std_logic;
+			reset		   : IN std_logic;
+			en				: IN std_logic;
+			DataInA		: IN std_logic_vector (FP_WIDTH-1 DOWNTO 0);
+			DataInB		: IN std_logic_vector (FP_WIDTH-1 DOWNTO 0);
+			DataInC		: IN std_logic_vector (FP_WIDTH-1 DOWNTO 0);	
+			EnOp			: IN std_logic_vector (OP_NUM-1 DOWNTO 0);		
+			SelMuxIn    : IN std_logic_vector (SEL_NUM-1 DOWNTO 0);
+			nan		   : OUT std_logic;
+			overflow		: OUT std_logic;
+			division_by_zero : OUT std_logic;
+			underflow   : OUT std_logic;
+			zero		   : OUT std_logic;
+			DataOut		: OUT std_logic_vector (FP_WIDTH-1 DOWNTO 0)	
+		);
+	END COMPONENT;
+	
+	COMPONENT LoadStoreUnit is
+		Generic (
+			ADDR_WIDTH : natural := 8
+		);
+		Port (
+			clk  : in std_logic;
+			InstrIn	: in instruction_word_type;
+			DataRegIn : in data_out_col_array_type;
+			wren : out std_logic;
+			wben : out std_logic;
+			raddr	: out natural range 0 to 2**ADDR_WIDTH-1;
+			waddr	: out natural range 0 to 2**ADDR_WIDTH-1;
+			DataSM : out data_out_col_array_type
+		);
+	END COMPONENT;
+	
+
+  -----------------------------------------------------------------------
+  -- MEM Component
+  -----------------------------------------------------------------------		
+	
+	COMPONENT SharedMemBlock
+		Generic(
+			DATA_WIDTH : natural := 8;
+			ADDR_WIDTH : natural := 6
+		);
+		Port(
+			clk		: in std_logic;
+			raddr	: in natural range 0 to 2**ADDR_WIDTH - 1;
+			waddr	: in natural range 0 to 2**ADDR_WIDTH - 1;
+			data	: in std_logic_vector((DATA_WIDTH-1) downto 0);
+			we		: in std_logic := '1';
+			q		: out std_logic_vector((DATA_WIDTH -1) downto 0)
+		);
+	END COMPONENT;
+	
+  -----------------------------------------------------------------------
+  -- ID Signals
+  -----------------------------------------------------------------------	
+	
+	-- Issue signals
+	signal op_out, op_out_stage12, op_out_stage23, op_out_stage3Ex : instruction_word_type := ISTR_WORD_INIT;
+	signal no_op, no_op_stage12 : std_logic := '0';
+	
+	-- DecoderRegMap signals
+	signal wr_en_reg_map, nop_out_dec : std_logic := '0';
+	signal warpid_reg_map : std_logic_vector(Warp_Id_Length-1 downto 0) := (others => '0');
+	signal reg1_reg_map, reg2_reg_map, reg_wr_reg_map : std_logic_vector(Reg_Addr_Length-1 downto 0) := (others => '0');
+	signal op_reg_map : std_logic_vector(REG_OP_SP-1 downto 0) := (others => '0');
+	signal num_reg_map : std_logic_vector(Max_RegBlock_Numb-1 downto 0) := (others => '0');
+	
+	-- Dispatcher signals
+	signal mux_out, mux_out_stage23 : std_logic_vector (SEL_NUM-1 downto 0) := (others => '0');
+	signal en_op_out, en_op_out_stage23 : std_logic_vector (OP_NUM-1 DOWNTO 0) := (others => '0');
+	
+	-- Register Map and Register Blocks signals	
+	signal data_regbank_in, data_regbank_out_a, data_regbank_out_b : data_out_col_array_type := (others => (others => '0'));
+	signal data_out_a, data_out_b: data_out_matrix_type := (others => (others => (others => '0')));
+	signal reg_addr1, reg_addr2, reg_addr_wr : std_logic_vector(RegBlock_Addr_Length-1 downto 0) := (others => '0'); 
+	signal reg_addr1_stage23, reg_addr2_stage23, reg_addr_wr_stage23 : std_logic_vector(RegBlock_Addr_Length-1 downto 0) := (others => '0');
+	signal block_addr1, block_addr2, block_addr1_stage23 : std_logic_vector(Block_Addr_Length-1 downto 0) := (others => '0'); 
+	signal block_addr2_stage23, block_addr1_stage3out, block_addr2_stage3out : std_logic_vector(Block_Addr_Length-1 downto 0) := (others => '0');
+	signal wr_en, wr_en_stage23 : std_logic_vector(RegBlock_Row_Numb-1 downto 0) := (others => '0');
+	signal rd_en_a, rd_en_b : std_logic := '1';
+	signal not_found_stage23, not_found : std_logic := '0';
+	
+	-- Register Write Controller
+	signal reg_addr_wr_regcontr : std_logic_vector(RegBlock_Addr_Length-1 downto 0) := (others => '0');
+	signal wr_en_regcontr : std_logic_vector(RegBlock_Row_Numb-1 downto 0) := (others => '0');
+	signal no_op_write_contr : std_logic := '0';
+
+
+  -----------------------------------------------------------------------
+  -- EX Signals
+  -----------------------------------------------------------------------		
+	
+	-- FPU Core
+	signal data_fpcore_in_a_IdEx, data_fpcore_in_b_IdEx, data_core_out_ExMem : data_out_col_array_type := (others => (others => '0')); 
+	signal data_core_out_MemWb, data_core_out : data_out_col_array_type := (others => (others => '0'));
+	signal mux_out_reg, mux_out_IdEx : std_logic_vector (SEL_NUM-1 downto 0) := (others => '0');
+	signal en_op_reg, en_op_IdEx : std_logic_vector (OP_NUM-1 DOWNTO 0) := (others => '0');
+	
+	-- LSU
+	signal wren_lsu, wren_ExMem, wb_en_lsu, wb_en_lsu_ExMem : std_logic := '0';
+	signal raddr_lsu, waddr_lsu : natural range 0 to 2**Shared_Mem_Addr_Width-1 := 0;
+	signal data_out_lsu : data_out_col_array_type := (others => (others => '0'));
+	
+  -----------------------------------------------------------------------
+  -- MEM Signals
+  -----------------------------------------------------------------------	
+	signal raddr_ExMem, waddr_ExMem, waddr_ShMem	: natural range 0 to 2**Shared_Mem_Addr_Width-1 := 0;
+	signal data_regbank_out_IdEx, data_regbank_out_ExMem, data_shmem_out : data_out_col_array_type := (others => (others => '0')); 
+	signal data_shmem_out_MemWb, data_shmem_in : data_out_col_array_type := (others => (others => '0'));
+	signal wr_en_sh_mem, wr_en_shmem_input : std_logic := '0';
+	
+  -----------------------------------------------------------------------
+  -- WB Signals
+  -----------------------------------------------------------------------	
+   signal wb_en_MemWb, wb_en_data : std_logic := '0';
+	signal data_wb_out, data_regbank_WB_in : data_out_col_array_type := (others => (others => '0'));
+	
+begin
+
+  -----------------------------------------------------------------------
+  -- ID
+  -----------------------------------------------------------------------		
+  -----------------------------------------------------------------------
+  -- Stage 1 - Issue
+  -----------------------------------------------------------------------
+	Issue_inst : Issue
+		Port Map(
+			clk => clk,
+			reset => reset,
+			enable => en,
+			EnQueue => EnQueue,
+			OpIn => OpQueueIn,
+			NopOut => no_op,
+			OpOut => op_out
+		);	
+	
+	RegStage12 : process(clk, reset) begin
+		if reset = '1' then
+			no_op_stage12 <= '0';
+			op_out_stage12 <= ISTR_WORD_INIT;
+			
+		elsif rising_edge(clk) then
+			no_op_stage12 <= no_op;
+			op_out_stage12 <= op_out;
+			no_op_write_contr <= no_op_stage12;
+		end if;
+	end process;
+	
+  -----------------------------------------------------------------------
+  -- Stage 2 - Decode and Register Map
+  -----------------------------------------------------------------------
+  
+	DecoderRegMap_inst : DecoderRegMap
+		Generic Map(
+			Warp_Id_Length => Warp_Id_Length,
+			Reg_Addr_Length => Reg_Addr_Length,
+			Max_RegBlock_Numb => Max_RegBlock_Numb
+			)
+		Port Map(
+			OpIn => op_out_stage12,
+			NopIn => no_op_stage12,
+			WrEnRegMap => wr_en_reg_map,
+			WarpIdRegMap => warpid_reg_map,
+			RegIn1RegMap => reg1_reg_map,
+			RegIn2RegMap => reg2_reg_map,
+			RegInWrRegMap => reg_wr_reg_map,
+			OpRegMap => op_reg_map,
+			NumRegMap => num_reg_map, 
+			NopOut => nop_out_dec
+		);
+  
+	Dispatcher_Inst : Dispatcher
+		Port Map(
+			clk => clk,
+			reset => reset,
+			en => en,
+			NopIn => nop_out_dec,
+			op => op_out_stage12.Operation,
+			MuxOut => mux_out,
+			EnOpOut => en_op_out
+		);
+	
+	RegMap_Inst : RegisterMap
+		Generic Map(
+			Warp_Id_Length => Warp_Id_Length,
+			Reg_Addr_Length => Reg_Addr_Length,
+			Max_RegBlock_Numb => Max_RegBlock_Numb,
+			Block_Addr_Length => Block_Addr_Length,
+			RegBlock_Addr_Length => RegBlock_Addr_Length,
+			RegBlock_Numb => RegBlock_Row_Numb
+	   )		
+		Port Map(
+			clk => clk, 
+			reset => reset,
+			en => en,
+			WrEn => wr_en_reg_map,
+			WarpId => warpid_reg_map,
+			RegIn1 => reg1_reg_map,
+			RegIn2 => reg2_reg_map,
+			RegInWr => reg_wr_reg_map,
+			OpIn => op_reg_map,
+			NumReg => num_reg_map,
+			BlockAddr1 => block_addr1,
+			BlockAddr2 => block_addr2,
+			RegAddr1	=> reg_addr1,
+			RegAddr2 => reg_addr2,
+			RegAddrWr => reg_addr_wr,
+			WrEnVect => wr_en,
+			NotFound => not_found
+		);
+		
+	RegWrContr_inst : RegWrContr 
+		Generic Map(
+			RegBlock_Addr_Length => REG_BLOCK_ADDR_SP,
+			RegBlock_Numb => REG_BLOCK_ROW
+		  )
+		Port Map(
+			clk => clk,
+			reset	=> reset,
+			en => en,
+			op	=> op_out_stage12.Operation,
+			EnWr => no_op_write_contr,
+			RegAddrWr => reg_addr_wr,
+			WrEnVect	=> wr_en,
+			RegAddrWrOut => reg_addr_wr_regcontr,
+			WrEnVectOut => wr_en_regcontr
+		);
+   
+  RegStage23 : process(clk, reset) begin
+		if reset = '1' then
+			block_addr1_stage23 <= (others => '0');
+			block_addr2_stage23 <= (others => '0');
+			reg_addr1_stage23 <= (others => '0');
+			reg_addr2_stage23 <= (others => '0');
+			wr_en_stage23 <= (others => '0');
+			not_found_stage23 <= '0';
+			mux_out_stage23 <= (others => '0');
+			en_op_out_stage23 <= (others => '0');
+			op_out_stage23 <= ISTR_WORD_INIT;
+			
+		elsif rising_edge(clk) then
+			block_addr1_stage23 <= block_addr1;
+			block_addr2_stage23 <= block_addr2;
+			
+			reg_addr1_stage23 <= reg_addr1;
+			reg_addr2_stage23 <= reg_addr2;
+			reg_addr_wr_stage23 <= reg_addr_wr_regcontr;
+			
+			wr_en_stage23 <= wr_en_regcontr;
+			not_found_stage23 <= not_found;
+			mux_out_stage23 <= mux_out;
+			en_op_out_stage23 <= en_op_out;
+			op_out_stage23 <= op_out_stage12;
+			
+			data_regbank_in <= data_regbank_WB_in;
+		end if;
+  end process;
+  
+  -----------------------------------------------------------------------
+  -- Stage 3 - Register Banks
+  -----------------------------------------------------------------------  
+  
+  	RegBlock_Col_Gen: for j in 0 to Core_Numb-1 generate
+		RegBlock_Row_Gen: for i in 0 to RegBlock_Row_Numb-1 generate
+			RegBlockX : RegisterBank
+				Generic Map(RegisterLength, f_log2(RegisterBlockDepth))
+				Port Map(
+					clk => clk, 
+					reset => reset, 
+					DataIn => data_regbank_in(j), 
+					RdAddrA => reg_addr1_stage23, 
+					RdAddrB => reg_addr2_stage23, 
+					WrAddr => reg_addr_wr_stage23, 
+					ReadEnA => rd_en_a, 
+					ReadEnB => rd_en_b, 
+					WriteEn => wr_en_stage23(i), 
+					DataOutA => data_out_a(j)(i), 
+					DataOutB => data_out_b(j)(i)
+				);
+		end generate RegBlock_Row_Gen;
+	end generate RegBlock_Col_Gen;
+	
+	data_regbank_out_a <= row_output_map(data_out_a, Core_Numb, conv_integer(block_addr1_stage3out));
+	data_regbank_out_b <= row_output_map(data_out_b, Core_Numb, conv_integer(block_addr2_stage3out));
+	--NotFound <= not_found_stage23;
+	
+	RegStage_IdEx : process(clk, reset) begin
+		if reset = '1' then
+			block_addr1_stage3out <= (others => '0');
+			block_addr2_stage3out <= (others => '0');
+			data_fpcore_in_a_IdEx <= (others => (others => '0'));
+			data_fpcore_in_b_IdEx <= (others => (others => '0'));
+			mux_out_IdEx <= (others => '0');
+			
+			op_out_stage3Ex <= ISTR_WORD_INIT;
+			
+		elsif rising_edge(clk) then
+			block_addr1_stage3out <= block_addr1_stage23;
+			block_addr2_stage3out <= block_addr2_stage23;
+			
+			data_fpcore_in_a_IdEx <= data_regbank_out_a;
+			data_fpcore_in_b_IdEx <= data_regbank_out_b;
+			data_regbank_out_IdEx <= data_regbank_out_a;
+			
+			mux_out_reg <= mux_out_stage23;
+			en_op_reg <= en_op_out_stage23;
+			
+			mux_out_IdEx <= mux_out_reg;
+			en_op_IdEx <= en_op_reg;
+			
+			op_out_stage3Ex <= op_out_stage23;
+		end if;
+  end process;	
+
+  -----------------------------------------------------------------------
+  -- Ex
+  -----------------------------------------------------------------------			
+	
+	FPCore_Generate: for i in 0 to Core_Numb-1 generate
+		FPUX : FPCore
+			PORT MAP(
+				clk => clk,
+				reset	=> reset,
+				en	=> en,
+				DataInA => data_fpcore_in_a_IdEx(i),
+				DataInB => data_fpcore_in_b_IdEx(i),
+				DataInC => data_fpcore_in_a_IdEx(i),
+				EnOp => en_op_IdEx,		
+				SelMuxIn => mux_out_IdEx,
+				nan => open,
+				overflow => open,
+				division_by_zero => open,
+				underflow => open,
+				zero => open,
+				DataOut => data_core_out(i)	
+		);
+	end generate FPCore_Generate;
+	
+	
+	LSU_inst : LoadStoreUnit 
+		Generic Map(
+			ADDR_WIDTH => Shared_Mem_Addr_Width
+		)
+		Port Map(
+			clk => clk,
+			DataRegIn => data_regbank_out_IdEx,
+			InstrIn => op_out_stage3Ex,
+			wren => wren_lsu,
+			wben => wb_en_lsu,
+			raddr	=> raddr_lsu,
+			waddr	=> waddr_lsu,
+			DataSM => data_out_lsu
+		);
+		
+	RegStage_ExMem : process(clk, reset) begin
+		if reset = '1' then
+			data_core_out_ExMem <= (others => (others => '0'));
+			data_regbank_out_ExMem <= (others => (others => '0'));
+			
+			wren_ExMem <= '0';
+			wb_en_lsu_ExMem <= '0';
+			
+		elsif rising_edge(clk) then
+			data_core_out_ExMem <= data_core_out;
+			data_regbank_out_ExMem <= data_out_lsu;
+			
+			wren_ExMem <= wren_lsu;
+			raddr_ExMem <= raddr_lsu;
+			waddr_ExMem <= waddr_lsu;
+			wb_en_lsu_ExMem <= wb_en_lsu;
+			
+		end if;
+  end process;	
+	
+  -----------------------------------------------------------------------
+  -- MEM - Shared Memory
+  -----------------------------------------------------------------------
+	data_shmem_in <= DataIn when WrShMem = '1'
+						  else data_regbank_out_ExMem;
+	waddr_ShMem <= conv_integer(ShMemAddr) when WrShMem = '1'
+						  else waddr_ExMem;
+	wr_en_sh_mem <= WrShMem or wren_ExMem;
+ 
+	SharedMem_Generate: for i in 0 to Core_Numb-1 generate
+		SMemX : SharedMemBlock
+			Generic Map(
+				DATA_WIDTH => RegisterLength,
+				ADDR_WIDTH => Shared_Mem_Addr_Width
+			)
+			Port Map(
+				clk => clk,
+				raddr	=> raddr_ExMem,
+				waddr => waddr_ShMem,
+				data => data_shmem_in(i),
+				we => wr_en_sh_mem,
+				q => data_shmem_out(i)
+		);
+	end generate SharedMem_Generate;		
+	
+	RegStage_MemWb : process(clk, reset) begin
+		if reset = '1' then
+			data_shmem_out_MemWb <= (others => (others => '0'));
+			data_core_out_MemWb <= (others => (others => '0'));
+			wb_en_data <= '0';
+			
+		elsif rising_edge(clk) then
+			data_shmem_out_MemWb <= data_shmem_out;
+			data_core_out_MemWb <= data_core_out_ExMem;
+			
+			wb_en_data <= wb_en_lsu_ExMem;
+		end if;
+  end process;	
+  
+  -----------------------------------------------------------------------
+  -- WB
+  -----------------------------------------------------------------------
+  
+	data_regbank_WB_in <= data_shmem_out_MemWb when wb_en_data = '1' 
+						  else data_core_out_MemWb;
+	
+	data_wb_out <= data_shmem_out_MemWb when wb_en_data = '1' 
+						  else data_core_out_MemWb;
+  
+  Reg_WB : process(clk) begin
+	 if rising_edge(clk)then
+		DataOut <= data_wb_out;
+	end if;
+  end process
+	
+end rtl;

@@ -1,0 +1,175 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    22/06/2015
+-- Design Name: 
+-- Module Name:    SM - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description: 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 3.0
+-- Revision 0.01 - File Created
+-- Additional Comments:
+--
+----------------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+library work;
+use work.fpupack.all;
+
+entity SM is
+	PORT(
+		clk	    : in std_logic;
+		reset		 : in std_logic;
+		en			 : in std_logic;
+		enWr  	 : in std_logic;
+		OpIn  	 : in queue_type;
+		DataInA	 : in std_logic_vector (FP_WIDTH-1 downto 0);
+		DataInB	 : in std_logic_vector (FP_WIDTH-1 downto 0);
+		DataInC	 : in std_logic_vector (FP_WIDTH-1 downto 0);	
+		DataOut	 : out std_logic_vector (FP_WIDTH-1 downto 0);
+		nan		 : out std_logic;
+		overflow	 : out std_logic;
+		dbzero 	 : out std_logic;
+		underflow : out std_logic;
+		zero		 : out std_logic
+	);
+end entity;
+
+architecture rtl of SM is
+
+	COMPONENT registro_n_bit
+		 Generic (N : natural:=4);
+		 Port ( 
+			 value_in  : in  STD_LOGIC_VECTOR (N-1 downto 0);
+			 clk 	     : in  STD_LOGIC;
+			 reset     : in  STD_LOGIC;
+			 en        : in  STD_LOGIC;
+			 value_out : out  STD_LOGIC_VECTOR (N-1 downto 0)
+			 );
+	END COMPONENT;
+
+	COMPONENT Dispatcher 
+		PORT(
+			reset	   : IN std_logic;
+			en 	   : IN std_logic;
+			clk	   : IN std_logic;
+			NopIn		: IN std_logic;
+			op		   : IN std_logic_vector (SEL_NUM-1 DOWNTO 0);
+			MuxOut   : OUT std_logic_vector (SEL_NUM-1 downto 0);
+			EnOpOut	: OUT std_logic_vector (OP_NUM-1 DOWNTO 0)
+		);
+	END COMPONENT;
+	
+	COMPONENT Issue 
+		Port(
+				clk   : in std_logic;
+				reset : in std_logic;
+				enable: in std_logic;
+				enWr  : in std_logic;
+				OpIn  : in queue_type;
+				Nop   : out std_logic;
+				OpOut : out std_logic_vector(SEL_NUM-1 downto 0)
+			);	
+	END COMPONENT;
+	
+	COMPONENT FPCore
+		PORT(
+			clk	   	: IN std_logic;
+			reset		   : IN std_logic;
+			en				: IN std_logic;
+			DataInA		: IN std_logic_vector (FP_WIDTH-1 DOWNTO 0);
+			DataInB		: IN std_logic_vector (FP_WIDTH-1 DOWNTO 0);
+			DataInC		: IN std_logic_vector (FP_WIDTH-1 DOWNTO 0);	
+			EnOp			: IN std_logic_vector (OP_NUM-1 DOWNTO 0);		
+			SelMuxIn    : IN std_logic_vector (SEL_NUM-1 DOWNTO 0);
+			nan		   : OUT std_logic;
+			overflow		: OUT std_logic;
+			division_by_zero : OUT std_logic;
+			underflow   : OUT std_logic;
+			zero		   : OUT std_logic;
+			DataOut		: OUT std_logic_vector (FP_WIDTH-1 DOWNTO 0)	
+		);
+	END COMPONENT;
+	
+	signal en_op, en_op_reg : std_logic_vector (OP_NUM-1 DOWNTO 0);
+	signal sel_mux, sel_mux_reg, op_in, op_reg  : std_logic_vector (SEL_NUM-1 DOWNTO 0);
+	signal DataA_reg1, DataB_reg1, DataC_reg1, DataA_reg2, DataB_reg2, DataC_reg2	: std_logic_vector (FP_WIDTH-1 DOWNTO 0);
+   signal nop_in, nop_reg : std_logic := '0';
+
+begin
+
+  -----------------------------------------------------------------------
+  -- ID
+  -----------------------------------------------------------------------		
+	Issue_Inst : Issue 
+		PORT MAP(
+				clk => clk,
+				reset => reset,
+				enable => en,
+				enWr => enWr,
+				OpIn => OpIn,
+				Nop => nop_in,
+				OpOut => op_in
+	);	
+	
+	Reg_IssueDisp : process(clk) begin
+		if rising_edge(clk) then
+			op_reg <= op_in;
+			nop_reg <= nop_in;
+			DataA_reg1 <= DataInA;
+			DataB_reg1 <= DataInB;
+			DataC_reg1 <= DataInC;
+		end if;
+	end process;
+
+	Dispatch_Inst : Dispatcher 
+		PORT MAP(
+			reset => reset,
+			en => en,
+			clk => clk,
+			NopIn => nop_reg,
+			op	=> op_reg,
+			MuxOut => sel_mux,
+			EnOpOut	=> en_op
+	);
+
+	Reg_IdEx : process(clk) begin
+		if rising_edge(clk) then
+			DataA_reg2 <= DataA_reg1;
+			DataB_reg2 <= DataB_reg1;
+			DataC_reg2 <= DataC_reg1;
+			sel_mux_reg <= sel_mux;
+			en_op_reg <= en_op;
+		end if;
+	end process;
+
+  -----------------------------------------------------------------------
+  -- Ex
+  -----------------------------------------------------------------------			
+	ExFPU : FPCore
+		PORT MAP(
+			clk => clk,
+			reset	=> reset,
+			en	=> en,
+			DataInA => DataA_reg2,
+			DataInB => DataB_reg2,
+			DataInC => DataC_reg2,
+			EnOp => en_op_reg,		
+			SelMuxIn => sel_mux_reg,
+			nan => nan,
+			overflow => overflow,
+			division_by_zero => dbzero,
+			underflow => underflow,
+			zero => zero,
+			DataOut => DataOut	
+	);
+end rtl;

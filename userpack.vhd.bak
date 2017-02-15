@@ -1,0 +1,46 @@
+library IEEE;
+
+use ieee.numeric_std.all;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+package userpack is
+
+  -----------------------------------------------------------------------
+  -- FPCore Types and Constants
+  -----------------------------------------------------------------------	
+  
+	  -- Core Number
+	  constant CORE_NUMB : natural := 2;
+		 
+	  -- Max number of warps in a SM
+	  constant MAX_NUM_WARP : natural := 64;
+	  
+     -- Operators supported in each FPU Core. If the value is '1' the relative operator will be in each FPU Core
+	  constant ADDSUB_GEN : natural := 1;
+	  constant MULT_GEN : natural := 1;
+	  constant DIV_GEN : natural := 0;
+	  constant ABS_GEN : natural := 0;
+	  constant NEG_GEN : natural := 0;
+	  constant MAX_GEN : natural := 0;
+	  constant MIN_GEN : natural := 0;
+	  constant CEILFLOOR_GEN : natural := 0;
+	  constant RINT_GEN : natural := 0;
+	  constant FRAC_GEN : natural := 0;	 
+
+	  
+  -----------------------------------------------------------------------
+  -- Issue Types and Constants
+  -----------------------------------------------------------------------	
+	
+	 -- Number of parallel instruction words 
+    constant INSTR_NUMB : natural := 2;	  
+		
+end userpack;
+
+package body userpack is
+
+
+
+end userpack;

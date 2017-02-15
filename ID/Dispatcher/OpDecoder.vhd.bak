@@ -1,0 +1,134 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+library work;
+use work.fpupack.all;
+
+entity OpDecoder is
+	PORT(
+		op		  : IN std_logic_vector (SEL_NUM-1 downto 0);
+		OpMux : OUT std_logic_vector (SEL_NUM-1 downto 0);
+		OpLat   : OUT std_logic_vector (QUEUE_LENGTH-1 downto 0);
+		EnOp	  : OUT std_logic_vector (OP_NUM-1 DOWNTO 0)
+	);
+end entity;
+
+architecture rtl of OpDecoder is
+	
+	signal MuxContEnRead, MuxContEnWrite, MuxContEmpty, MuxContFull : std_logic := '0';
+	signal MuxContDataIn, MuxContDataOut : std_logic_vector (SEL_NUM-1 downto 0) := (others => '0');
+	signal MuxContWrAddr : std_logic_vector (QUEUE_LENGTH-1 downto 0) := (others => '0');
+
+begin
+	
+	OpMux <= MuxContDataIn;
+	OpLat <= MuxContWrAddr;
+	
+	Decode : process(op)
+		begin			
+				case op is
+					when ADD_OP =>
+						MuxContDataIn <= ADD_OP;
+						MuxContWrAddr <= ADD_LAT;
+						EnOp(0) <= '1';
+						EnOp(12 downto 1) <= (others => '0');
+						
+					when SUB_OP =>
+						MuxContDataIn <= SUB_OP;
+						MuxContWrAddr <= SUB_LAT;
+						EnOp(1) <= '1';
+						EnOp(0) <= '0';
+						EnOp(12 downto 2) <= (others => '0');
+						
+					when MULT_OP =>
+						MuxContDataIn <= MULT_OP;
+						MuxContWrAddr <= MULT_LAT;
+						EnOp(2) <= '1';
+						EnOp(12 downto 3) <= (others => '0');
+						EnOp(1 downto 0) <= (others => '0');
+						
+					when DIV_OP =>
+						MuxContDataIn <= DIV_OP;
+						MuxContWrAddr <= DIV_LAT;
+						EnOp(4) <= '1';
+						EnOp(12 downto 5) <= (others => '0');
+						EnOp(3 downto 0) <= (others => '0');
+						
+					when FMA_OP =>
+						MuxContDataIn <= FMA_OP;
+						MuxContWrAddr <= FMA_LAT;
+						EnOp(3) <= '1';
+						EnOp(2) <= '1';
+						EnOp(1) <= '0';
+						EnOp(0) <= '0';
+						EnOp(12 downto 4) <= (others => '0');
+
+					when ABS_OP =>
+						MuxContDataIn <= ABS_OP;
+						MuxContWrAddr <= ABS_LAT;
+						EnOp(5) <= '1';
+						EnOp(12 downto 6) <= (others => '0');
+						EnOp(4 downto 0) <= (others => '0');
+
+					when NEG_OP =>
+						MuxContDataIn <= NEG_OP;
+						MuxContWrAddr <= NEG_LAT;
+						EnOp(6) <= '1';
+						EnOp(12 downto 7) <= (others => '0');
+						EnOp(5 downto 0) <= (others => '0');
+
+					when MAX_OP =>
+						MuxContDataIn <= MAX_OP;
+						MuxContWrAddr <= MAX_LAT;
+						EnOp(7) <= '1';
+						EnOp(12 downto 8) <= (others => '0');
+						EnOp(6 downto 0) <= (others => '0');
+
+					when MIN_OP =>
+						MuxContDataIn <= MIN_OP;
+						MuxContWrAddr <= MIN_LAT;
+						EnOp(8) <= '1';
+						EnOp(12 downto 9) <= (others => '0');
+						EnOp(7 downto 0) <= (others => '0');
+						
+					when CEIL_OP =>
+						MuxContDataIn <= CEIL_OP;
+						MuxContWrAddr <= CEIL_LAT;
+						EnOp(9) <= '1';
+						EnOp(12 downto 10) <= (others => '0');
+						EnOp(8 downto 0) <= (others => '0');						
+
+					when FLOOR_OP =>
+						MuxContDataIn <= FLOOR_OP;
+						MuxContWrAddr <= FLOOR_LAT;
+						EnOp(10) <= '1';
+						EnOp(12 downto 11) <= (others => '0');
+						EnOp(9 downto 0) <= (others => '0');
+
+					when RINT_OP =>
+						MuxContDataIn <= RINT_OP;
+						MuxContWrAddr <= RINT_LAT;
+						EnOp(11) <= '1';
+						EnOp(12) <= '0';
+						EnOp(10 downto 0) <= (others => '0');
+
+					when FRAC_OP =>
+						MuxContDataIn <= FRAC_OP;
+						MuxContWrAddr <= FRAC_LAT;
+						EnOp(12) <= '1';
+						EnOp(11 downto 0) <= (others => '0');
+						
+					when NOP =>
+						EnOp <= (others => '0');
+						MuxContDataIn <= NOP;
+						MuxContWrAddr <= (others => '1');
+
+					when others =>
+						MuxContDataIn <= (others => '1');
+						MuxContWrAddr <= (others => '1');
+						EnOp <= (others => '0');
+				end case;
+		end process;
+
+end rtl;

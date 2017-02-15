@@ -1,0 +1,46 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    26/06/2015
+-- Design Name: 
+-- Module Name:    LoadStoreUnit - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description: 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 1.0
+-- Revision 0.01 - File Created
+-- Additional Comments:
+--
+----------------------------------------------------------------------------------
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+library work;
+use work.fpupack.all;
+use work.logpack.all;
+
+entity LoadStoreUnit is
+	Generic (
+		DATA_WIDTH : natural := 8
+	);
+	Port (
+		a	   : in signed	((DATA_WIDTH-1) downto 0);
+		b	   : in signed	((DATA_WIDTH-1) downto 0);
+		result : out signed ((DATA_WIDTH-1) downto 0)
+	);
+
+end entity;
+
+architecture rtl of LoadStoreUnit is
+begin
+
+
+end rtl;

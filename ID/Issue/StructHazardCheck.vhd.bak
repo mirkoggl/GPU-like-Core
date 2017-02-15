@@ -1,0 +1,86 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    29/04/2015
+-- Design Name: 
+-- Module Name:    StructHazardCheck - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description: 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 1.0
+-- Revision 0.01 - File Created
+-- Additional Comments: 
+--
+----------------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+library work;
+use work.fpupack.all;
+
+entity StructHazardCheck is
+	Port(
+		clk 	: in std_logic;
+		reset : in std_logic;
+		en    : in std_logic;
+		op	   : in std_logic_vector (SEL_NUM-1 DOWNTO 0);
+		Ind   : in std_logic_vector(OP_QUEUE_IND-1 downto 0);
+		MuxCollVector : in std_logic_vector (MAX_LATENCY-1 downto 0);
+		AdderCollVect : in std_logic_vector (MULT_LAT_S downto 0);
+		IndOut : out std_logic_vector(OP_QUEUE_IND-1 downto 0);
+		GrantedOut : out std_logic
+	);
+end entity;
+
+architecture rtl of StructHazardCheck is
+	
+	signal grant : std_logic := '0';
+--   signal lastOp : OpType := NOP_FP;
+
+begin
+	
+	GrantedOut <= not grant;
+	IndOut <= Ind;
+	
+	CollisionVector : process(clk, reset)
+		begin
+			if rising_edge(clk) then 
+				if reset = '1' then
+					grant <= '0';
+				elsif en = '1' then
+					if op /= NOP then
+						if (('0' & MuxCollVector(MAX_LATENCY-1 downto 1)) or CollVectRom(conv_integer(op))) = ('0' & MuxCollVector(MAX_LATENCY-1 downto 1)) then 
+							grant <= '0';
+					--		lastOp <= NOP_FP;
+						-- Controllo su ADD e FMA
+						elsif op = ADD_OP then 
+							if AdderCollVect(0) = '1'  then 
+								grant <= '0';
+					--			lastOp <= NOP_FP;
+							else
+								grant <= '1';
+						--		lastOp <= OpVect(conv_integer(op));
+							end if;				
+						else
+							grant <= '1';
+					--		lastOp <= OpVect(conv_integer(op));
+						end if;
+					else 
+						grant <= '0';
+				--		lastOp <= NOP_FP;
+					end if;	
+				else 
+					grant <= '0';
+				--	lastOp <= NOP_FP;
+				end if;
+			end if;
+	end process;
+
+end rtl;

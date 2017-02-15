@@ -1,0 +1,96 @@
+LIBRARY ieee;
+USE ieee.std_logic_1164.ALL;
+ 
+-- Uncomment the following library declaration if using
+-- arithmetic functions with Signed or Unsigned values
+--USE ieee.numeric_std.ALL;
+ 
+ENTITY tbc IS
+END tbc;
+ 
+ARCHITECTURE behavior OF tbc IS 
+ 
+    -- Component Declaration for the Unit Under Test (UUT)
+ 
+    COMPONENT SM is
+		Generic (
+				RegisterLength : natural := REG_BLOCK_WIDTH;
+				RegisterBlockDepth : natural := REG_BLOCK_DEPTH;	
+				Warp_Id_Length : natural := WARP_ID_SP;
+				Reg_Addr_Length : natural := REG_ADDR_SP;
+				Max_RegBlock_Numb : natural := MAX_REG_BLOCK_PER_WARP;
+				Block_Addr_Length : natural := ROW_ADDR_SP;
+				RegBlock_Addr_Length : natural := REG_BLOCK_ADDR_SP;
+				RegBlock_Row_Numb : natural := REG_BLOCK_ROW;
+				Core_Numb : natural := CORE_NUMB
+			);
+		 Port(
+				clk    : in std_logic;
+				reset  : in std_logic;
+				en     : in std_logic;
+				EnQueue   : in std_logic;
+				OpQueueIn : in instruction_word_queue_type;
+				nan		 : out std_logic;
+				overflow	 : out std_logic;
+				dbzero	 : out std_logic;
+				underflow : out std_logic;
+				zero		 : out std_logic;
+				DataOut	 : out data_out_fpu_array_type
+			);
+    END COMPONENT;
+    
+
+   --Inputs
+   signal clk, en, EnQueue : std_logic := '0';
+   signal OpQueueIn : instruction_word_queue_type := (others => ISTR_WORD_INIT);
+   signal reset : std_logic := '1';
+
+ 	--Outputs
+   signal nan, overflow, dbzero, underflow, zero  : std_logic := '0';
+   signal DataOut : data_out_fpu_array_type;
+
+   -- Clock period definitions
+   constant clk_period : time := 10 ns;
+ 
+BEGIN
+ 
+	-- Instantiate the Unit Under Test (UUT)
+   uut: SM PORT MAP (
+          clk => clk,
+          en => en,
+			 reset => reset,
+          EnQueue => EnQueue,
+          OpQueueIn => OpQueueIn,
+          nan => nan,
+          overflow => overflow,
+          dbzero => dbzero,
+          underflow => underflow,
+			 zero => zero,
+			 DataOut => DataOut
+        );
+
+   -- Clock process definitions
+   clk_process :process
+   begin
+		clk <= '0';
+		wait for clk_period/2;
+		clk <= '1';
+		wait for clk_period/2;
+   end process;
+ 
+
+   -- Stimulus process
+   stim_proc: process
+   begin		
+      -- hold reset state for 100 ns.
+      wait for 100 ns;	
+
+      wait for clk_period*10;
+
+      -- insert stimulus here 
+
+      wait;
+   end process;
+
+END;
+

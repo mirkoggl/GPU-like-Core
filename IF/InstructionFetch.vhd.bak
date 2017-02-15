@@ -1,0 +1,42 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    27/02/2016
+-- Design Name: 
+-- Module Name:    InstructionFetch - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description: 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 1.0
+-- Revision 0.01 - File Created
+-- Additional Comments:
+--
+----------------------------------------------------------------------------------
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity InstructionFetch is
+	Port(
+		clk	   	: in std_logic;
+		reset	   	: in std_logic;
+		en				: in std_logic;
+		WarpMaskIn  : in std_logic_vector(INSTR_NUMB-1 downto 0);
+ 		WarpMaskOut : out std_logic_vector(INSTR_NUMB-1 downto 0);
+		OpQueue  	: out instruction_word_queue_type
+	);
+
+end entity;
+
+architecture rtl of signed_adder is
+begin
+
+	result <= a + b;
+
+end rtl;

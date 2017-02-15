@@ -1,0 +1,88 @@
+----------------------------------------------------------------------------------
+-- Company: 
+-- Author: 	Mirko Gagliardi
+-- 
+-- Create Date:    22/04/2015
+-- Design Name: 
+-- Module Name:    VectorShifter - rtl 
+-- Project Name: 	 Streaming Multiprocessor	
+-- Target Devices: 
+-- Tool versions: 
+-- Description: 
+--
+-- Dependencies: 	 
+--
+-- Revision: v 1.3
+-- Revision 0.01 - File Created
+-- Additional Comments: 
+--
+----------------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+entity VectorShifterReg is
+	Generic (
+		N : natural := 4;
+		M : natural := 4
+	);
+	Port (  
+		clk     : in std_logic;
+		reset   : in std_logic;
+      EnRd    : in std_logic;   
+      EnWr    : in std_logic;    
+      DataOut : out std_logic_vector(N-1 downto 0);   
+      DataIn  : in std_logic_vector (N-1 downto 0);   
+		WrAddr  : in std_logic_vector (M-1 downto 0)   
+      );
+end VectorShifterReg;
+
+architecture Behavioral of VectorShifter is
+
+   constant ones_vector : std_logic_vector(N-1 downto 0) := (others => '1');
+	constant zeroes_vector : std_logic_vector(N-1 downto 0) := (others => '0');
+	
+	type memory_type is array (0 to 2**M-1) of std_logic_vector(N-1 downto 0);
+	signal memory : memory_type :=(others => (others => '0'));
+	signal start : std_logic := '0';
+	signal readptr : std_logic_vector(M-1 downto 0) := (others => '0');
+
+begin
+
+	ReadCurrent : process(clk)
+		begin
+			if rising_edge(clk) then
+				if EnRd = '1' then
+					start <= '1';
+					DataOut <= memory(conv_integer(readptr));
+					readptr <= readptr + '1';
+				end if;
+				
+				if conv_integer(readptr) = (2**M) then     
+					readptr <= (others => '0');
+				end if;
+				
+			end if;
+	end process;
+	
+	WriteUpdate : process(clk, reset)
+		begin
+			if reset = '1' then
+				memory <= (others => (others => '1'));
+			elsif (rising_edge(clk)) then
+				if EnRd = '1' then
+					if readptr /= zeroes_vector then
+						memory(conv_integer(readptr - '1' )) <= (others => '1');
+					elsif start = '1' then
+						memory(2**M-1) <= (others => '1');
+					end if;
+				end if;
+				
+				if EnWr = '1' then
+					memory((conv_integer(WrAddr + readptr)) mod 2**M) <= DataIn;
+				end if;
+				
+			end if;
+	end process;
+end Behavioral;
